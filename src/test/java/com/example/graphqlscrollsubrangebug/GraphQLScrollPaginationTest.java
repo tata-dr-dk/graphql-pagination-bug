@@ -27,7 +27,6 @@ class GraphQLScrollPaginationTest extends AbstractWebIntegrationTest {
 
     @Test
     void ShouldFindProduction() {
-        var storeNumber = "0001";
 
         var mutationDocument = """                
                 mutation MyMutations {
@@ -50,10 +49,11 @@ class GraphQLScrollPaginationTest extends AbstractWebIntegrationTest {
                 .path("")
                 .entity(Customer.class);
 
+        // first query all documents
         // language=GraphQL
-        var document = """
+        var queryAllDocument = """
                 query MyQuery {
-                   customers(storeNumber: "0001", after: "T18x") {
+                   customers(storeNumber: "0001") {
                      edges {
                            cursor
                            node {
@@ -64,14 +64,39 @@ class GraphQLScrollPaginationTest extends AbstractWebIntegrationTest {
                      }
                  }
             """;
-        graphQlTester.document(document)
+
+        // ...then use the first document's cursor to make a filtered query
+        var queryTemplate = """
+                query MyQuery {
+                   customers(storeNumber: "0001", after: "%s") {
+                     edges {
+                           cursor
+                           node {
+                             storeNumber
+                             name
+                           }
+                         }
+                     }
+                 }
+            """;
+
+        graphQlTester.document(queryAllDocument)
                 .execute()
                 .path("")
                 .entity(Map.class)
                 .satisfies(result -> {
                     var edges = (List)((Map)result.get("customers")).get("edges");
-                    assertThat((edges).size()).isEqualTo(2);
+                    var firstCursor = ((Map)edges.get(0)).get("cursor");
+                    graphQlTester.document(queryTemplate.formatted(firstCursor))
+                            .execute()
+                            .path("")
+                            .entity(Map.class)
+                            .satisfies(result2 -> {
+                                var edges2 = (List)((Map)result2.get("customers")).get("edges");
+                                assertThat((edges2).size()).isEqualTo(2);
+                            });
                 });
+
     }
 }
 
