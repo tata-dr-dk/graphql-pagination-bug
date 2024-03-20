@@ -7,6 +7,7 @@ import org.springframework.boot.test.autoconfigure.graphql.tester.AutoConfigureG
 import org.springframework.context.annotation.Import;
 import org.springframework.graphql.test.tester.GraphQlTester;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -26,7 +27,7 @@ class GraphQLScrollPaginationTest extends AbstractWebIntegrationTest {
     private GraphQlTester graphQlTester;
 
     @Test
-    void ShouldFindProduction() {
+    void shouldFilterByDocumentCursor() {
 
         var mutationDocument = """                
                 mutation MyMutations {
@@ -88,6 +89,84 @@ class GraphQLScrollPaginationTest extends AbstractWebIntegrationTest {
                     var edges = (List)((Map)result.get("customers")).get("edges");
                     var firstCursor = ((Map)edges.get(0)).get("cursor");
                     graphQlTester.document(queryTemplate.formatted(firstCursor))
+                            .execute()
+                            .path("")
+                            .entity(Map.class)
+                            .satisfies(result2 -> {
+                                var edges2 = (List)((Map)result2.get("customers")).get("edges");
+                                assertThat((edges2).size()).isEqualTo(2);
+                            });
+                });
+
+    }
+
+
+    @Test
+    void shouldFilterByPageEndCursor() {
+
+        var mutationDocument = """                
+                mutation MyMutations {
+                  addCustomer(name: "%s", storeNumber: "0002") {
+                    name
+                    storeNumber
+                  }
+                }
+                """;
+        Arrays.asList(1,2,3,4,5,6,7,8,9,10,11,12).stream().forEach(x ->
+                graphQlTester.document(mutationDocument.formatted("Document_" + x))
+                        .execute()
+                        .path("")
+                        .entity(Customer.class)
+        );
+
+
+        // first query page 1
+        // language=GraphQL
+        var queryAllDocument = """
+                query MyQuery {
+                   customers(storeNumber: "0002") {
+                     pageInfo {
+                       hasNextPage
+                       endCursor
+                     }
+                     edges {
+                           cursor
+                           node {
+                             storeNumber
+                             name
+                           }
+                         }
+                     }
+                 }
+            """;
+
+        // ...then use the page one cursor to make a filtered query (get next page)
+        var queryTemplate = """
+                query MyQuery {
+                   customers(storeNumber: "0002", after: "%s") {
+                     edges {
+                           cursor
+                           node {
+                             storeNumber
+                             name
+                           }
+                         }
+                     }
+                 }
+            """;
+
+        graphQlTester.document(queryAllDocument)
+                .execute()
+                .path("")
+                .entity(Map.class)
+                .satisfies(result -> {
+                    var pageInfo = (Map)((Map)result.get("customers")).get("pageInfo");
+                    var hasNextPage = pageInfo.get("hasNextPage");
+                    assertThat(hasNextPage).isEqualTo(true);
+                    var nextPageCursor = pageInfo.get("endCursor");
+                    var edges = (List)((Map)result.get("customers")).get("edges");
+                    assertThat((edges).size()).isEqualTo(10);
+                    graphQlTester.document(queryTemplate.formatted(nextPageCursor))
                             .execute()
                             .path("")
                             .entity(Map.class)
